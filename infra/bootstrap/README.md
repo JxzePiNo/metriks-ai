@@ -16,7 +16,11 @@ This is a separate Terraform root (`infra/bootstrap/`) with **local state**: the
 | `aws_s3_bucket_versioning.state` | Versioning enabled: every state revision is kept. |
 | `aws_s3_bucket_server_side_encryption_configuration.state` | Default encryption with SSE-S3 (AES-256). |
 | `aws_s3_bucket_lifecycle_configuration.state` | Expires old noncurrent versions (default: older than 90 days **and** beyond the newest 10) and aborts incomplete multipart uploads after 7 days. |
-| `aws_s3_bucket_policy.state` | Denies any request that is not HTTPS, and any request using TLS older than 1.2. |
+| `aws_s3_bucket_policy.state` | Denies any request that is not HTTPS, and any request using TLS older than 1.2 (AWS service principals are excluded from the denies, as AWS documents, because AWS redacts the transport condition keys on service-to-service calls). |
+
+**Region handling.** The bucket is created in `var.aws_region` (`eu-south-1`). For any region other than `us-east-1` the AWS provider (v6.69.0, checked in its source) sends the region as the `LocationConstraint` of `CreateBucket`, and `eu-south-1` is a valid value in the AWS API reference. `eu-south-1` is an opt-in region, so it must be enabled in the account (it was, in the earlier read-only audit).
+
+**Ordering.** The configuration resources are chained with `depends_on` (ownership, public-access block, versioning, encryption, lifecycle, then the policy) so S3 gets one change at a time. In the provider source only some of these resources retry `OperationAborted`, which is why the chain is explicit. The lifecycle rule needs versioning enabled first, per the provider documentation.
 
 No DynamoDB table is created: locking uses S3 native locking (`use_lockfile = true`), which is generally available since Terraform 1.11.0 and is the approach HashiCorp documents (DynamoDB-based locking is deprecated).
 
@@ -100,11 +104,13 @@ Do **not** run this as part of merging the PR. Run it only after explicit approv
 
 ## IAM permissions
 
-These are least-privilege **drafts**, not yet exercised against AWS. When running them the first time, an `AccessDenied` message will name any missing action; adjust deliberately and keep the resource scope.
+These policies were derived from the AWS provider v6.69.0 source (the API calls each resource makes) and the AWS API documentation. They have **not** been exercised against AWS, so they are drafts, not a guaranteed minimum. If a run reports `AccessDenied`, the message names the missing action; add it deliberately and keep the resource scope.
+
+S3 bucket-level actions take the bucket ARN (`arn:aws:s3:::<bucket>`); object-level actions take object ARNs (`arn:aws:s3:::<bucket>/<key>`).
 
 ### To run the bootstrap (one-off, temporary role)
 
-Scope to the bucket name pattern; replace `metriks-ai-tfstate-*` if you change `project`.
+Every action below is a bucket-level action, so the resource is the bucket ARN pattern. `metriks-ai-tfstate-*` matches `<project>-tfstate-<suffix>`; change it if you change `project`.
 
 ```json
 {
@@ -116,7 +122,8 @@ Scope to the bucket name pattern; replace `metriks-ai-tfstate-*` if you change `
       "Action": [
         "s3:CreateBucket",
         "s3:ListBucket",
-        "s3:GetBucketLocation",
+        "s3:TagResource",
+        "s3:ListTagsForResource",
         "s3:GetBucketTagging",
         "s3:PutBucketTagging",
         "s3:GetBucketVersioning",
@@ -140,17 +147,30 @@ Scope to the bucket name pattern; replace `metriks-ai-tfstate-*` if you change `
         "s3:GetBucketRequestPayment",
         "s3:GetReplicationConfiguration"
       ],
-      "Resource": "arn:aws:s3:::metriks-ai-tfstate-*"
+      "Resource": "arn:aws:s3:::metriks-ai-tfstate-*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "eu-south-1" }
+      }
     }
   ]
 }
 ```
 
-`s3:DeleteBucket` and `s3:DeleteBucketPolicy` are intentionally absent: the bucket is not meant to be destroyed by this role. Do not grant `s3:*`.
+Why these actions:
+
+- `s3:CreateBucket`, `s3:ListBucket` (the provider's `HeadBucket` check) and the `Put*`/`Get*` actions cover the seven resources: bucket, ownership controls, public-access block, versioning, encryption, lifecycle and policy.
+- The provider's bucket read also calls the ACL, CORS, website, logging, Object Lock, accelerate, request-payment and replication getters, so the matching `Get*` actions are listed even though the configuration does not set those features.
+- `CreateBucket` sends the `private` canned ACL. The AWS API reference says only `s3:CreateBucket` is required in that case (`s3:PutBucketAcl` is needed for other ACLs), so `PutBucketAcl` is not granted.
+- `s3:TagResource` is needed to create a bucket **with tags** (AWS API reference). In the provider source, tag reads try `s3:ListTagsForResource` first and tag writes try `s3:TagResource`/`s3:UntagResource` first; each falls back to `GetBucketTagging`/`PutBucketTagging`/`DeleteBucketTagging` when the preferred action is denied. Removing a tag later would need `s3:UntagResource` or `s3:DeleteBucketTagging`, which are not granted because the configuration never removes tags.
+- **No account-level (`Resource: "*"`) actions are included.** None of the S3 calls made by these seven resources in provider v6.69.0 are account-level (for example the provider code does not call `ListAllMyBuckets` or `GetBucketLocation`), and the account safeguard uses STS `GetCallerIdentity`, which needs no IAM permission. If a future provider version or your tooling needs one, add it with its own appropriately scoped statement.
+- `aws:RequestedRegion` restricts the role to `eu-south-1`.
+- `s3:DeleteBucket` and `s3:DeleteBucketPolicy` are intentionally absent: this role cannot destroy the bucket.
+
+With this policy the role can create the bucket named by the pattern. It can also be used to run `plan`, since refreshing reads use the same getters. Do not grant `s3:*`.
 
 ### To use the state afterwards (every Terraform run of `../terraform`)
 
-Replace `<bucket>` and the key with the real values. With `use_lockfile = true` the lock is the object `<key>.tflock` next to the state object (per the HashiCorp S3 backend documentation).
+Replace `<bucket>` with the bucket name and `<project>` with the project (default `metriks-ai`). Keys follow `<project>/<name>/terraform.tfstate`; the backend writes `<key>.tflock` next to the state object when `use_lockfile = true` (HashiCorp S3 backend documentation). The first statement is bucket-level (bucket ARN); the others are object-level (object ARNs).
 
 ```json
 {
@@ -161,25 +181,29 @@ Replace `<bucket>` and the key with the real values. With `use_lockfile = true` 
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::<bucket>",
-      "Condition": { "StringLike": { "s3:prefix": ["metriks-ai/*"] } }
+      "Condition": { "StringLike": { "s3:prefix": ["<project>/*"] } }
     },
     {
       "Sid": "ReadWriteState",
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject"],
-      "Resource": "arn:aws:s3:::<bucket>/metriks-ai/terraform.tfstate"
+      "Resource": "arn:aws:s3:::<bucket>/<project>/*"
     },
     {
-      "Sid": "ReadWriteDeleteLock",
+      "Sid": "DeleteLockFiles",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-      "Resource": "arn:aws:s3:::<bucket>/metriks-ai/terraform.tfstate.tflock"
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::<bucket>/<project>/*.tflock"
     }
   ]
 }
 ```
 
-State access is sensitive: state can contain secret values. Grant it only to the roles that deploy, never broadly.
+State access is sensitive: state can contain secret values. Grant it only to the roles that deploy, never broadly. If workspaces are used, the backend lists and writes under its `workspace_key_prefix` (default `env:`); add that prefix to the policy then.
+
+### To inspect or restore old state versions (recovery)
+
+Listing and reading old versions needs `s3:ListBucketVersions` on the bucket ARN and `s3:GetObjectVersion` on the object ARN, in addition to the statements above. Grant these to a recovery role, not to routine deployments.
 
 ## Encryption: SSE-S3 versus a customer-managed KMS key
 
@@ -200,7 +224,7 @@ The bucket stores a few small state files. Costs are driven by version history, 
 
 ## Recovery and protection
 
-- **Bad apply or corrupted state:** list versions with `aws s3api list-object-versions --bucket <bucket> --prefix <key>`, then restore a previous version (copy it back as the current object with `aws s3api copy-object`, or download it and `terraform state push` after review). Retention is at least `noncurrent_version_retention_days` days *and* the newest `noncurrent_versions_to_keep` versions.
+- **Bad apply or corrupted state** (needs the recovery permissions above): list versions with `aws s3api list-object-versions --bucket <bucket> --prefix <key>`, then restore a previous version (copy it back as the current object with `aws s3api copy-object`, or download it and `terraform state push` after review). Retention is at least `noncurrent_version_retention_days` days *and* the newest `noncurrent_versions_to_keep` versions.
 - **Accidental object deletion:** with versioning a delete only adds a delete marker; removing the marker restores the object.
 - **Accidental bucket deletion:** `force_destroy = false` makes a non-empty bucket undeletable through Terraform, and `prevent_destroy = true` makes Terraform refuse any plan that would destroy or replace it. To delete it on purpose, first migrate state elsewhere, empty all versions, remove the `prevent_destroy` line in a reviewed change, and get explicit approval.
 - **Lost local bootstrap state:** the bucket still exists but Terraform no longer tracks it. Recover by re-creating `terraform.tfvars` with the same values and importing the seven resources (`terraform import` mutates state and requires explicit approval), or keep a backup as advised in step 6.
@@ -221,6 +245,6 @@ Only after the bucket actually exists (separate PR, separate approval):
 3. Grant the deploying role the "use the state" permissions above.
 4. Migrate the existing local state: `terraform init -backend-config=backend.hcl -migrate-state`.
 5. Verify with `terraform state list`, then remove the local state file.
-6. Use a distinct `key` per root module or environment (for example `metriks-ai/dev/terraform.tfstate`).
+6. The generated `key` is `<project>/terraform.tfstate`. When a second root module or environment needs its own state, give it a distinct key under the same prefix (for example `metriks-ai/dev/terraform.tfstate`); the "use the state" policy above already covers `<project>/*`.
 
 Until then, `init -backend=false` keeps working for `../terraform` without any AWS access.

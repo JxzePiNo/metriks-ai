@@ -14,7 +14,8 @@ output "state_bucket_region" {
 }
 
 # Printed for the follow-up PR that switches ../terraform to this backend.
-# Adjust `key` per root module/environment.
+# Keep every `key` under the `<project>/` prefix: the "use the state" IAM policy in
+# README.md grants access to `<project>/*`.
 output "backend_config_hcl" {
   description = "Partial backend configuration for ../terraform (save as backend.hcl, which is not committed)."
   value       = <<-EOT

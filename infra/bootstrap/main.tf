@@ -1,5 +1,11 @@
 # Remote Terraform state bucket (S3). Creates nothing until a deliberate,
 # separately approved `terraform apply` -- see README.md.
+#
+# Bucket configuration resources are chained with depends_on so S3 receives
+# one configuration change at a time. Concurrent changes can fail with
+# OperationAborted, and the AWS provider (v6.69.0 source) retries that error only
+# for some of these resources. The order is:
+#   ownership -> public access block -> versioning -> encryption -> lifecycle -> policy
 
 resource "aws_s3_bucket" "state" {
   bucket = local.bucket_name
@@ -26,6 +32,8 @@ resource "aws_s3_bucket_ownership_controls" "state" {
 resource "aws_s3_bucket_public_access_block" "state" {
   bucket = aws_s3_bucket.state.id
 
+  depends_on = [aws_s3_bucket_ownership_controls.state]
+
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -36,6 +44,8 @@ resource "aws_s3_bucket_public_access_block" "state" {
 # accidental overwrite recoverable.
 resource "aws_s3_bucket_versioning" "state" {
   bucket = aws_s3_bucket.state.id
+
+  depends_on = [aws_s3_bucket_public_access_block.state]
 
   versioning_configuration {
     status = "Enabled"
@@ -52,6 +62,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
       sse_algorithm = "AES256"
     }
   }
+
+  depends_on = [aws_s3_bucket_versioning.state]
 }
 
 # Bound the cost of version history without losing recoverability: superseded
@@ -76,8 +88,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "state" {
     }
   }
 
-  # Lifecycle rules on a versioned bucket require versioning to be configured first.
-  depends_on = [aws_s3_bucket_versioning.state]
+  # Versioning must be enabled first (provider documentation); encryption is
+  # ordered before it only to keep bucket configuration changes sequential.
+  depends_on = [
+    aws_s3_bucket_versioning.state,
+    aws_s3_bucket_server_side_encryption_configuration.state,
+  ]
 }
 
 data "aws_iam_policy_document" "state_bucket" {
@@ -98,6 +114,14 @@ data "aws_iam_policy_document" "state_bucket" {
     condition {
       test     = "Bool"
       variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+
+    # AWS redacts the transport keys on service-to-service calls; without this,
+    # the deny could block AWS service principals (see AWS S3 policy-key docs).
+    condition {
+      test     = "Bool"
+      variable = "aws:PrincipalIsAWSService"
       values   = ["false"]
     }
   }
@@ -121,6 +145,12 @@ data "aws_iam_policy_document" "state_bucket" {
       variable = "s3:TlsVersion"
       values   = ["1.2"]
     }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["false"]
+    }
   }
 }
 
@@ -128,7 +158,9 @@ resource "aws_s3_bucket_policy" "state" {
   bucket = aws_s3_bucket.state.id
   policy = data.aws_iam_policy_document.state_bucket.json
 
-  # Apply the public-access block first so the policy is never evaluated
-  # against a bucket that is not yet locked down.
-  depends_on = [aws_s3_bucket_public_access_block.state]
+  # Applied last, after the public-access block and all other bucket settings.
+  depends_on = [
+    aws_s3_bucket_public_access_block.state,
+    aws_s3_bucket_lifecycle_configuration.state,
+  ]
 }
