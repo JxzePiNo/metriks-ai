@@ -14,6 +14,8 @@
 !*.tfvars.example
 *.tfplan
 tfplan
+backend.hcl
+*.backend.hcl
 override.tf
 override.tf.json
 *_override.tf
