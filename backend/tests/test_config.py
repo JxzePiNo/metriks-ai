@@ -30,3 +30,24 @@ def test_rejects_invalid_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOG_LEVEL", "LOUD")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_cors_origins_default_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    assert Settings(_env_file=None).cors_origins == []
+
+
+def test_cors_origins_are_parsed_from_comma_separated_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "CORS_ORIGINS", "http://localhost:3000/, https://app.example.com"
+    )
+    settings = Settings(_env_file=None)
+    assert settings.cors_origins == ["http://localhost:3000", "https://app.example.com"]
+
+
+def test_cors_wildcard_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ORIGINS", "*")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

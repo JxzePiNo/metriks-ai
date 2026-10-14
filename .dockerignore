@@ -1,15 +1,21 @@
+# Root-level ignore file. Compose builds use ./frontend and ./backend as their
+# contexts, which have their own .dockerignore files; this one covers any build
+# that uses the repository root as context.
 .git
 .gitignore
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 **/node_modules
 **/.next
 **/__pycache__
+**/*.py[cod]
 **/.venv
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache
 **/*.tfstate*
+**/*.tfvars
 **/.terraform
-README.md
