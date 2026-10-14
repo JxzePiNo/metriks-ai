@@ -1,0 +1,32 @@
+import pytest
+from pydantic import ValidationError
+
+from app.core.config import Settings
+
+
+def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.app_env == "local"
+    assert settings.log_level == "INFO"
+
+
+def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    settings = Settings(_env_file=None)
+    assert settings.app_env == "production"
+    assert settings.log_level == "DEBUG"
+
+
+def test_rejects_invalid_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "staging-ish")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_rejects_invalid_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "LOUD")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
