@@ -38,6 +38,7 @@ Settings are read from environment variables, or from a local `.env` file in `ba
 | ----------- | ------------------------------------------------ | ------- |
 | `APP_ENV`   | `local`, `test`, `production`                    | `local` |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`  | `INFO`  |
+| `CORS_ORIGINS` | Comma-separated browser origins (no `*`)      | empty (CORS disabled) |
 
 Invalid values stop the application at startup. Logs are written to stdout as single-line JSON.
 

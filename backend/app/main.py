@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
 from app.core.config import Settings, get_settings
@@ -23,6 +24,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info("Shutting down %s", settings.app_name)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
     register_exception_handlers(app)
     app.include_router(health.router)
     return app
