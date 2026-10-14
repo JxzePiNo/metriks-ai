@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars (git-ignored) and adjust. Placeholders only:
+# never put credentials or secrets in tfvars files.
+
+# Required: the AWS account Terraform is allowed to operate on (12 digits).
+allowed_account_ids = ["123456789012"]
+
+# Optional overrides (defaults shown).
+# aws_region  = "eu-south-1"
+# project     = "metriks-ai"
+# environment = "dev"
+# extra_tags  = { Owner = "your-team" }
