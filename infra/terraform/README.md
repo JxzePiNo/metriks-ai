@@ -89,7 +89,7 @@ Not verified for this account: which permission sets exist and what they allow, 
 
 ## State bootstrap design (separate, approved step)
 
-State stays local until a dedicated PR, explicitly approved, creates the backend. Planned design:
+The bucket is defined (but **not created**) in [`../bootstrap`](../bootstrap/README.md), a separate Terraform root with local state. State here stays local until the bucket has been created with explicit approval and a follow-up PR switches this root to it. Planned design:
 
 1. A dedicated S3 bucket (for example `metriks-ai-tfstate-<account>-eu-south-1`) with versioning, SSE (KMS or S3-managed), all public access blocked, TLS-only policy and lifecycle rules for old versions. Created once, either by a tiny separate Terraform root with local state or manually, then protected from deletion.
 2. A `backend "s3"` block with `use_lockfile = true` (S3 native locking; DynamoDB locking is deprecated per the HashiCorp docs), `encrypt = true`, region `eu-south-1`.
