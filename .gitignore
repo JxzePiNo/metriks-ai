@@ -10,10 +10,19 @@
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfvars.json
 !*.tfvars.example
+*.tfplan
+tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 crash.log
+crash.*.log
 .terraformrc
 terraform.rc
+# .terraform.lock.hcl is intentionally tracked (provider version pinning).
 
 # Node / Next.js
 node_modules/
