@@ -48,6 +48,7 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
+backend/data/
 *.egg-info/
 dist/
 build/

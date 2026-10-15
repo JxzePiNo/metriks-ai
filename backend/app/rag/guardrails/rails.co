@@ -1,0 +1,4 @@
+define flow check company scope
+  $scope_allowed = execute company_scope_check
+  if not $scope_allowed
+    stop

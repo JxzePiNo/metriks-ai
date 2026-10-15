@@ -1,0 +1,8 @@
+models: []
+core:
+  embedding_search_provider:
+    name: exact_message_lookup
+rails:
+  input:
+    flows:
+      - check company scope

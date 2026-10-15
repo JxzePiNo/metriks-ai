@@ -20,6 +20,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        if isinstance(exc.detail, dict):
+            return _error(
+                exc.status_code,
+                exc.detail.get("code", f"http_{exc.status_code}"),
+                exc.detail.get("message", "Request failed"),
+                **{k: v for k, v in exc.detail.items() if k not in {"code", "message"}},
+            )
         return _error(exc.status_code, f"http_{exc.status_code}", str(exc.detail))
 
     @app.exception_handler(RequestValidationError)

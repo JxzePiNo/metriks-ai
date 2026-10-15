@@ -1,0 +1,46 @@
+# Run with: docker compose -f docker-compose.yml -f docker-compose.rag.yml up --build
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  backend:
+    build:
+      args:
+        INSTALL_RAG: "true"
+    environment:
+      RAG_ENABLED: "true"
+      RAG_DATA_DIR: /app/data/rag
+      RAG_API_TOKENS: ${RAG_API_TOKENS:-}
+      IDENTITY_ENCRYPTION_KEY: ${IDENTITY_ENCRYPTION_KEY:-}
+      IDENTITY_LOOKUP_KEY: ${IDENTITY_LOOKUP_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_INDEX: ${ELASTICSEARCH_INDEX:-metriks-chunks-multilingual-v2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/mmarco-mMiniLMv2-L12-H384-v1}
+      DEFAULT_QUERY_LANGUAGE: ${DEFAULT_QUERY_LANGUAGE:-en}
+      OCR_ENABLED: "true"
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-eng+ita}
+    volumes:
+      - rag_data:/app/data
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  elasticsearch_data:
+  rag_data:

@@ -1,11 +1,12 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from threading import Lock
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health
+from app.api import health, rag
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
@@ -24,6 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info("Shutting down %s", settings.app_name)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.state.settings = settings
+    app.state.rag_service = None
+    app.state.rag_init_lock = Lock()
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -33,6 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
     register_exception_handlers(app)
     app.include_router(health.router)
+    app.include_router(rag.router)
     return app
 
 
